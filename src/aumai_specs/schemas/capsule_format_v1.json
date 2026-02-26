@@ -1,0 +1,391 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.aumai.dev/capsule-format/v1",
+  "title": "AumAI Deterministic Run Capsule",
+  "description": "Immutable record of a complete agent execution. Captures every input, decision, tool call, token expenditure, and output needed to deterministically replay or audit any run.",
+  "type": "object",
+  "required": [
+    "capsule_id",
+    "schema_version",
+    "created_at",
+    "agent",
+    "run",
+    "execution_trace",
+    "environment",
+    "outcome"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "capsule_id": {
+      "type": "string",
+      "pattern": "^capsule_[a-zA-Z0-9]{26}$",
+      "description": "Globally unique capsule identifier. Format: capsule_ followed by 26 alphanumeric chars (ULID-compatible)."
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "Version of the capsule schema used. Must be '1.0.0' for v1 capsules."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp when this capsule was sealed."
+    },
+    "agent": {
+      "type": "object",
+      "required": ["agent_id", "agent_name", "agent_version", "model"],
+      "additionalProperties": false,
+      "description": "Identity and configuration of the agent that produced this run.",
+      "properties": {
+        "agent_id": {
+          "type": "string",
+          "description": "Unique identifier for the agent definition."
+        },
+        "agent_name": {
+          "type": "string",
+          "description": "Human-readable agent name."
+        },
+        "agent_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Semantic version of the agent."
+        },
+        "model": {
+          "type": "object",
+          "required": ["provider", "model_id"],
+          "additionalProperties": false,
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": ["anthropic", "openai", "google", "mistral", "cohere", "local"],
+              "description": "Model provider."
+            },
+            "model_id": {
+              "type": "string",
+              "description": "Provider-specific model identifier (e.g. 'claude-opus-4-6')."
+            },
+            "model_version": {
+              "type": "string",
+              "description": "Specific model version or snapshot ID if pinned."
+            },
+            "parameters": {
+              "type": "object",
+              "description": "Inference parameters used (temperature, top_p, max_tokens, etc.).",
+              "additionalProperties": {}
+            }
+          }
+        },
+        "system_prompt_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "description": "SHA-256 hash of the system prompt for reproducibility verification."
+        },
+        "tools_loaded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["tool_name", "tool_version"],
+            "additionalProperties": false,
+            "properties": {
+              "tool_name": { "type": "string" },
+              "tool_version": { "type": "string" },
+              "tool_ir_hash": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              }
+            }
+          },
+          "description": "Tools available to the agent during this run."
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": ["run_id", "started_at", "ended_at", "status"],
+      "additionalProperties": false,
+      "description": "Run-level metadata.",
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "description": "Unique run/session identifier."
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ended_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["success", "failure", "partial", "cancelled", "timeout"],
+          "description": "Terminal status of the run."
+        },
+        "triggered_by": {
+          "type": "string",
+          "enum": ["human", "scheduler", "webhook", "agent", "test"],
+          "description": "What initiated this run."
+        },
+        "parent_run_id": {
+          "type": "string",
+          "description": "Parent run ID if this is a sub-agent invocation."
+        },
+        "goal": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "The high-level goal or instruction given to the agent."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "execution_trace": {
+      "type": "array",
+      "description": "Ordered sequence of all steps taken during the run.",
+      "items": {
+        "type": "object",
+        "required": ["step_index", "step_type", "started_at", "ended_at"],
+        "additionalProperties": false,
+        "properties": {
+          "step_index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based ordinal position of this step in the trace."
+          },
+          "step_type": {
+            "type": "string",
+            "enum": [
+              "llm_inference",
+              "tool_call",
+              "tool_result",
+              "planning",
+              "reflection",
+              "memory_read",
+              "memory_write",
+              "human_handoff",
+              "sub_agent_spawn",
+              "sub_agent_result",
+              "error"
+            ],
+            "description": "What kind of operation this step represents."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Wall-clock duration of this step in milliseconds."
+          },
+          "input": {
+            "description": "Input provided to this step. Schema varies by step_type.",
+            "oneOf": [
+              { "type": "object" },
+              { "type": "string" },
+              { "type": "null" }
+            ]
+          },
+          "output": {
+            "description": "Output produced by this step. Schema varies by step_type.",
+            "oneOf": [
+              { "type": "object" },
+              { "type": "string" },
+              { "type": "null" }
+            ]
+          },
+          "tokens": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Token usage for LLM inference steps.",
+            "properties": {
+              "input_tokens": { "type": "integer", "minimum": 0 },
+              "output_tokens": { "type": "integer", "minimum": 0 },
+              "cache_read_tokens": { "type": "integer", "minimum": 0 },
+              "cache_write_tokens": { "type": "integer", "minimum": 0 },
+              "total_tokens": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "cost": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Cost attribution for this step.",
+            "properties": {
+              "input_cost_usd": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Cost of input tokens in USD."
+              },
+              "output_cost_usd": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Cost of output tokens in USD."
+              },
+              "tool_cost_usd": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Cost of any external tool API calls in USD."
+              },
+              "total_cost_usd": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Total cost for this step in USD."
+              }
+            }
+          },
+          "tool_name": {
+            "type": "string",
+            "description": "Name of the tool invoked (only present for tool_call/tool_result steps)."
+          },
+          "tool_call_id": {
+            "type": "string",
+            "description": "Correlation ID linking a tool_call step to its tool_result step."
+          },
+          "error_code": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 699,
+            "description": "AumAI taxonomy error code if this step produced an error."
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Error message if this step produced an error."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Step-level arbitrary metadata.",
+            "additionalProperties": {}
+          }
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "required": ["aumai_runtime_version", "python_version"],
+      "additionalProperties": false,
+      "description": "Runtime environment snapshot at the time of execution.",
+      "properties": {
+        "aumai_runtime_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Version of the AumAI runtime that executed this capsule."
+        },
+        "python_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Python interpreter version."
+        },
+        "os": {
+          "type": "string",
+          "description": "Operating system identifier (e.g. 'linux/amd64', 'darwin/arm64')."
+        },
+        "container_image": {
+          "type": "string",
+          "description": "Docker image digest if run in a container (e.g. 'sha256:abc...')."
+        },
+        "sandbox_tier": {
+          "type": "string",
+          "enum": ["e2b_micro", "e2b_standard", "modal_ephemeral", "docker_local", "none"],
+          "description": "Sandbox environment used for tool execution."
+        },
+        "network_policy": {
+          "type": "string",
+          "enum": ["isolated", "allowlist_only", "full_access"],
+          "description": "Network access policy applied during this run."
+        },
+        "extra": {
+          "type": "object",
+          "description": "Additional environment key-value pairs.",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "required": ["final_answer"],
+      "additionalProperties": false,
+      "description": "Final result produced by the agent.",
+      "properties": {
+        "final_answer": {
+          "description": "The agent's final response or output artifact.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "object" },
+            { "type": "null" }
+          ]
+        },
+        "structured_output": {
+          "type": "object",
+          "description": "Validated structured output conforming to the agent's output schema.",
+          "additionalProperties": {}
+        },
+        "total_tokens": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "input_tokens": { "type": "integer", "minimum": 0 },
+            "output_tokens": { "type": "integer", "minimum": 0 },
+            "total_tokens": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "total_cost_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Total cost of the entire run in USD."
+        },
+        "total_steps": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of steps in the execution trace."
+        },
+        "total_tool_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "errors_encountered": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 100, "maximum": 699 },
+          "description": "List of error codes encountered during the run."
+        },
+        "goal_achieved": {
+          "type": "boolean",
+          "description": "Agent's self-assessed goal completion."
+        },
+        "confidence_score": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Agent's self-reported confidence in its output (0.0-1.0)."
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Cryptographic integrity metadata for tamper detection.",
+      "properties": {
+        "capsule_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "description": "SHA-256 hash of the canonical JSON of this capsule (excluding this field)."
+        },
+        "signature": {
+          "type": "string",
+          "description": "Base64-encoded Ed25519 signature over capsule_hash."
+        },
+        "signing_key_id": {
+          "type": "string",
+          "description": "Key identifier for signature verification."
+        }
+      }
+    }
+  }
+}

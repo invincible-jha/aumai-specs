@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.aumai.dev/agent-error-taxonomy/v1",
+  "title": "AumAI Agent Error Taxonomy",
+  "description": "Canonical error taxonomy for all AumAI agents. Uses 3-digit numeric codes grouped by category (1xx-6xx). Enables structured error handling, routing, and observability across heterogeneous agent deployments.",
+  "$defs": {
+    "error_instance": {
+      "type": "object",
+      "title": "AgentErrorInstance",
+      "description": "A single structured error emitted by an agent at runtime.",
+      "required": ["code", "category", "message", "severity"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 699,
+          "description": "Numeric error code from the AumAI taxonomy."
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "planning",
+            "tool_execution",
+            "context",
+            "security",
+            "resource",
+            "orchestration"
+          ],
+          "description": "High-level category matching the code's hundreds digit."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "Human-readable error message."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["debug", "info", "warning", "error", "critical"],
+          "description": "Operational severity level."
+        },
+        "recoverable": {
+          "type": "boolean",
+          "description": "Whether the agent can self-recover without human intervention."
+        },
+        "agent_id": {
+          "type": "string",
+          "description": "ID of the agent that emitted this error."
+        },
+        "run_id": {
+          "type": "string",
+          "description": "Run/session ID in which the error occurred."
+        },
+        "step_index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Zero-based index of the execution step where the error occurred."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 timestamp when the error was recorded."
+        },
+        "context": {
+          "type": "object",
+          "description": "Arbitrary key-value pairs providing additional diagnostic context.",
+          "additionalProperties": { "type": "string" }
+        },
+        "cause": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "Serialized upstream exception or error chain."
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Suggested back-off before retrying, if applicable."
+        }
+      }
+    }
+  },
+  "type": "object",
+  "description": "Top-level taxonomy document listing all defined error codes.",
+  "required": ["taxonomy_version", "categories"],
+  "additionalProperties": false,
+  "properties": {
+    "taxonomy_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of this taxonomy."
+    },
+    "categories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["category_name", "code_prefix", "description", "errors"],
+        "additionalProperties": false,
+        "properties": {
+          "category_name": {
+            "type": "string",
+            "description": "Short machine-readable name for the category."
+          },
+          "code_prefix": {
+            "type": "integer",
+            "description": "Hundreds prefix for all codes in this category (1-6).",
+            "minimum": 1,
+            "maximum": 6
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable description of what errors belong to this category."
+          },
+          "errors": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["code", "name", "description", "severity", "recoverable"],
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 699
+                },
+                "name": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]+$",
+                  "description": "SCREAMING_SNAKE_CASE symbolic name for the error."
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": ["debug", "info", "warning", "error", "critical"]
+                },
+                "recoverable": {
+                  "type": "boolean"
+                },
+                "retry_strategy": {
+                  "type": "string",
+                  "enum": ["none", "immediate", "exponential_backoff", "human_escalation"],
+                  "description": "Recommended retry strategy when this error is encountered."
+                },
+                "example_message": {
+                  "type": "string",
+                  "maxLength": 256
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "taxonomy_version": "1.0.0",
+      "categories": [
+        {
+          "category_name": "planning",
+          "code_prefix": 1,
+          "description": "Errors occurring during agent planning and goal decomposition",
+          "errors": [
+            {
+              "code": 101,
+              "name": "GOAL_DECOMPOSITION_FAILED",
+              "description": "Agent failed to decompose the high-level goal into executable sub-tasks",
+              "severity": "error",
+              "recoverable": true,
+              "retry_strategy": "exponential_backoff",
+              "example_message": "Could not decompose goal 'schedule meeting' into steps after 3 attempts"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

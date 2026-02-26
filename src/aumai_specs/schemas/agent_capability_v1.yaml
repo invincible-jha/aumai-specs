@@ -1,0 +1,385 @@
+---
+# AumAI Agent Capability Declaration v1
+# JSON Schema expressed as YAML for human-readable editing.
+# Canonical source: https://specs.aumai.dev/agent-capability/v1
+#
+# Usage: Every deployed agent must ship a capability manifest conforming
+# to this schema. The manifest is evaluated at agent registration time
+# to enforce sandbox tier, network policy, and resource governance.
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://specs.aumai.dev/agent-capability/v1"
+title: "AumAI Agent Capability Declaration"
+description: >
+  Capability manifest for an AumAI agent. Declares the sandbox
+  environment, network egress policy, filesystem access mode,
+  resource limits, required permissions, and tool bindings.
+  Evaluated at agent registration and enforced at runtime.
+
+type: object
+required:
+  - capability_version
+  - agent_id
+  - agent_name
+  - sandbox
+  - network
+  - filesystem
+  - resources
+  - permissions
+
+additionalProperties: false
+
+properties:
+  capability_version:
+    type: string
+    pattern: "^\\d+\\.\\d+\\.\\d+$"
+    description: Semantic version of this capability declaration.
+
+  agent_id:
+    type: string
+    minLength: 1
+    maxLength: 128
+    description: Unique agent identifier. Must match the registry entry.
+
+  agent_name:
+    type: string
+    minLength: 1
+    maxLength: 128
+    description: Human-readable agent name.
+
+  agent_version:
+    type: string
+    pattern: "^\\d+\\.\\d+\\.\\d+$"
+    description: Semantic version of the agent being declared.
+
+  description:
+    type: string
+    maxLength: 1024
+    description: Human-readable description of what this agent does.
+
+  sandbox:
+    type: object
+    description: Sandbox environment configuration.
+    required:
+      - tier
+    additionalProperties: false
+    properties:
+      tier:
+        type: string
+        enum:
+          - e2b_micro
+          - e2b_standard
+          - modal_ephemeral
+          - docker_local
+          - none
+        description: >
+          Sandbox execution tier. 'none' means no isolation (dev only).
+          Production deployments must use e2b_micro or higher.
+      image:
+        type: string
+        description: >
+          Container image reference for docker_local tier.
+          Must be a pinned digest (sha256:...) in production.
+        examples:
+          - "python:3.12-slim@sha256:abc123..."
+      startup_timeout_seconds:
+        type: integer
+        minimum: 1
+        maximum: 300
+        default: 30
+        description: Maximum seconds to wait for sandbox startup.
+      environment_variables:
+        type: object
+        description: Environment variables injected into the sandbox.
+        additionalProperties:
+          type: string
+      secrets:
+        type: array
+        description: >
+          Secret references (not values) injected as env vars.
+          Values are sourced from the secrets manager at runtime.
+        items:
+          type: object
+          required:
+            - secret_name
+            - env_var
+          additionalProperties: false
+          properties:
+            secret_name:
+              type: string
+              description: Secret name in the secrets manager.
+            env_var:
+              type: string
+              description: Environment variable name to bind the secret to.
+
+  network:
+    type: object
+    description: Network egress policy.
+    required:
+      - egress_mode
+    additionalProperties: false
+    properties:
+      egress_mode:
+        type: string
+        enum:
+          - isolated
+          - allowlist_only
+          - full_access
+        description: >
+          'isolated': no outbound connections permitted.
+          'allowlist_only': only explicitly listed hosts permitted.
+          'full_access': unrestricted (dev/trusted environments only).
+      egress_rules:
+        type: array
+        description: >
+          Explicit allowlist rules. Required when egress_mode is
+          'allowlist_only'. Ignored for other modes.
+        items:
+          type: object
+          required:
+            - host
+            - ports
+            - protocol
+          additionalProperties: false
+          properties:
+            host:
+              type: string
+              description: >
+                Hostname or CIDR range. Wildcards allowed at subdomain
+                level only (e.g. '*.anthropic.com').
+            ports:
+              type: array
+              items:
+                type: integer
+                minimum: 1
+                maximum: 65535
+              minItems: 1
+              description: Permitted destination ports.
+            protocol:
+              type: string
+              enum:
+                - tcp
+                - udp
+                - https
+                - http
+              description: Permitted protocol.
+            description:
+              type: string
+              maxLength: 256
+              description: Why this egress rule is needed.
+            rate_limit_rps:
+              type: integer
+              minimum: 1
+              description: Optional per-agent requests-per-second limit to this host.
+      dns_policy:
+        type: string
+        enum:
+          - default
+          - none
+          - cluster_first
+        default: default
+        description: DNS resolution policy within the sandbox.
+
+  filesystem:
+    type: object
+    description: Filesystem access configuration.
+    required:
+      - mode
+    additionalProperties: false
+    properties:
+      mode:
+        type: string
+        enum:
+          - none
+          - read_only
+          - read_write_ephemeral
+          - read_write_persistent
+        description: >
+          'none': no filesystem access.
+          'read_only': may read but not write.
+          'read_write_ephemeral': full R/W access, wiped after run.
+          'read_write_persistent': full R/W access with persistence
+          (requires explicit approval in governance).
+      allowed_paths:
+        type: array
+        description: >
+          Explicit list of paths the agent may access. Uses prefix
+          matching. Required when mode is not 'none'.
+        items:
+          type: string
+          description: Absolute path prefix (e.g. '/workspace/', '/tmp/').
+      max_file_size_mb:
+        type: integer
+        minimum: 1
+        maximum: 10240
+        default: 100
+        description: Maximum size for any single file the agent may write (MB).
+      max_total_storage_mb:
+        type: integer
+        minimum: 1
+        maximum: 102400
+        default: 1024
+        description: Maximum total storage consumed by the agent across all files (MB).
+
+  resources:
+    type: object
+    description: Compute resource limits.
+    required:
+      - max_cpu_cores
+      - max_memory_mb
+      - max_run_duration_seconds
+    additionalProperties: false
+    properties:
+      max_cpu_cores:
+        type: number
+        minimum: 0.1
+        maximum: 64
+        description: Maximum CPU cores available to the agent (fractional allowed).
+      max_memory_mb:
+        type: integer
+        minimum: 64
+        maximum: 131072
+        description: Maximum RAM in megabytes.
+      max_run_duration_seconds:
+        type: integer
+        minimum: 1
+        maximum: 86400
+        description: Hard wall-clock timeout for any single run.
+      max_concurrent_tool_calls:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 5
+        description: Maximum parallel tool invocations.
+      max_llm_calls_per_run:
+        type: integer
+        minimum: 1
+        maximum: 10000
+        default: 100
+        description: Maximum LLM inference calls within one run.
+      max_tokens_per_run:
+        type: integer
+        minimum: 1000
+        maximum: 100000000
+        description: Maximum cumulative tokens (input + output) per run.
+      max_cost_usd_per_run:
+        type: number
+        minimum: 0.001
+        maximum: 10000.0
+        description: Hard cost cap per run in USD. Run is aborted if exceeded.
+      gpu_required:
+        type: boolean
+        default: false
+        description: Whether the agent requires GPU access.
+
+  permissions:
+    type: object
+    description: >
+      Declared permission scopes required by this agent. Must be
+      explicitly granted by an operator before the agent can be deployed.
+    required:
+      - scopes
+    additionalProperties: false
+    properties:
+      scopes:
+        type: array
+        description: List of permission scope strings required.
+        items:
+          type: string
+          minLength: 1
+          maxLength: 256
+          examples:
+            - "tools:read"
+            - "tools:write"
+            - "memory:read"
+            - "memory:write"
+            - "human:escalate"
+            - "data:confidential"
+            - "data:restricted"
+            - "agents:spawn"
+            - "agents:kill"
+        uniqueItems: true
+      data_classifications:
+        type: array
+        description: >
+          Maximum data classification levels this agent may access.
+          Operator must approve each level above 'public'.
+        items:
+          type: string
+          enum:
+            - public
+            - internal
+            - confidential
+            - restricted
+        uniqueItems: true
+      pii_access:
+        type: boolean
+        default: false
+        description: Whether this agent may process personally identifiable information.
+      audit_all_runs:
+        type: boolean
+        default: true
+        description: >
+          Whether every run must be written to the immutable audit log.
+          Should only be false for ephemeral dev/test agents.
+
+  tools:
+    type: array
+    description: Tool bindings declared for this agent.
+    items:
+      type: object
+      required:
+        - tool_name
+        - tool_version
+      additionalProperties: false
+      properties:
+        tool_name:
+          type: string
+          description: Tool name as registered in the tool registry.
+        tool_version:
+          type: string
+          pattern: "^\\d+\\.\\d+\\.\\d+$"
+          description: Pinned version of the tool.
+        capability_subset:
+          type: array
+          items:
+            type: string
+          description: >
+            Subset of capability action names this agent is permitted
+            to invoke. If omitted, all capabilities are permitted.
+        optional:
+          type: boolean
+          default: false
+          description: Whether the agent can run without this tool being available.
+
+  metadata:
+    type: object
+    additionalProperties: false
+    description: Lifecycle and ownership metadata.
+    properties:
+      owner_team:
+        type: string
+        description: Team or person responsible for this agent.
+      approved_by:
+        type: string
+        description: Operator or reviewer who approved this capability manifest.
+      approved_at:
+        type: string
+        format: date-time
+        description: When this manifest was approved.
+      review_required_at:
+        type: string
+        format: date-time
+        description: When this manifest must be re-reviewed.
+      environment:
+        type: string
+        enum:
+          - development
+          - staging
+          - production
+        description: Target deployment environment.
+      labels:
+        type: object
+        description: Arbitrary key-value labels for grouping and filtering.
+        additionalProperties:
+          type: string

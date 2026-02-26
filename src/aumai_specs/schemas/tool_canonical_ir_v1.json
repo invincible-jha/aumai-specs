@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specs.aumai.dev/tool-canonical-ir/v1",
+  "title": "AumAI Tool Canonical IR",
+  "description": "Universal intermediate representation for agent tool definitions. Enables provider-agnostic tool exchange across OpenAI, Anthropic, MCP, and LangChain formats.",
+  "type": "object",
+  "required": ["name", "version", "capabilities", "inputs", "outputs"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_\\-\\.]*$",
+      "description": "Unique tool identifier. Must start with a letter and contain only alphanumerics, underscores, hyphens, and dots."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of this tool definition (e.g. 1.0.0)."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "description": "Human-readable description of what the tool does."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "uniqueItems": true,
+      "description": "Optional taxonomy tags for discovery and filtering."
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "description": "List of discrete actions this tool can perform.",
+      "items": {
+        "type": "object",
+        "required": ["action", "domain"],
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Verb-noun action this capability performs (e.g. 'read_file', 'send_email')."
+          },
+          "domain": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Problem domain this capability operates in (e.g. 'filesystem', 'email', 'database')."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Human-readable description of this specific capability."
+          },
+          "side_effects": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "network_egress",
+                "filesystem_write",
+                "filesystem_read",
+                "database_write",
+                "database_read",
+                "memory_mutation",
+                "external_api_call",
+                "email_send",
+                "process_spawn",
+                "environment_mutation"
+              ]
+            },
+            "uniqueItems": true,
+            "description": "Observable side effects this capability produces."
+          },
+          "idempotent": {
+            "type": "boolean",
+            "description": "Whether calling this capability multiple times with the same inputs produces the same result."
+          },
+          "cost_estimate": {
+            "type": "string",
+            "enum": ["free", "low", "medium", "high"],
+            "description": "Relative cost tier for invoking this capability (API calls, compute, etc.)."
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600,
+            "description": "Maximum recommended execution time in seconds."
+          }
+        }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "description": "JSON Schema describing the tool's input parameters.",
+      "properties": {
+        "type": { "type": "string" },
+        "properties": { "type": "object" },
+        "required": { "type": "array", "items": { "type": "string" } },
+        "additionalProperties": {}
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "description": "JSON Schema describing the tool's output structure.",
+      "properties": {
+        "type": { "type": "string" },
+        "properties": { "type": "object" },
+        "additionalProperties": {}
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Security metadata required to authorize and audit tool usage.",
+      "properties": {
+        "required_permissions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Permission scopes required before this tool may be invoked."
+        },
+        "data_classification": {
+          "type": "string",
+          "enum": ["public", "internal", "confidential", "restricted"],
+          "description": "Highest data classification level this tool can access or produce."
+        },
+        "pii_handling": {
+          "type": "string",
+          "enum": ["none", "read", "write", "both"],
+          "description": "Whether this tool reads or writes personally identifiable information."
+        },
+        "audit_required": {
+          "type": "boolean",
+          "description": "Whether every invocation must be written to an immutable audit log."
+        },
+        "rate_limit": {
+          "description": "Per-agent rate limits for this tool.",
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "requests_per_minute": { "type": "integer", "minimum": 1 },
+                "requests_per_day": { "type": "integer", "minimum": 1 }
+              }
+            },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "source_formats": {
+      "type": "object",
+      "description": "Original provider-specific tool definitions before canonicalization. Preserved for round-trip fidelity.",
+      "additionalProperties": false,
+      "properties": {
+        "openai": {
+          "type": "object",
+          "description": "OpenAI function-calling format definition."
+        },
+        "anthropic": {
+          "type": "object",
+          "description": "Anthropic tool-use format definition."
+        },
+        "mcp": {
+          "type": "object",
+          "description": "Model Context Protocol tool definition."
+        },
+        "langchain": {
+          "type": "object",
+          "description": "LangChain BaseTool-compatible definition."
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Registry and lifecycle metadata.",
+      "properties": {
+        "author": { "type": "string", "maxLength": 256 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "deprecated": { "type": "boolean" },
+        "deprecation_message": { "type": "string", "maxLength": 512 },
+        "successor_tool": { "type": "string" },
+        "registry_url": { "type": "string", "format": "uri" }
+      }
+    }
+  }
+}
